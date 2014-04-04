@@ -43,6 +43,7 @@ typedef struct __TOKEN {
 		STRING,
 		KEYWORD,
 		QUOTE,
+		BRACKET,
 		STOP
 	} type ;
 } __TOKEN;
@@ -70,6 +71,8 @@ char *trim(char *s);
 void int_usage();
 void _ubas_eval(__CONTEXT *context);
 
+void _ubas_debug_token(__TOKEN token);
+
 typedef struct __LABEL {
 	char name[UBAS_LABEL_LEN];
 	__STACK code;
@@ -92,10 +95,24 @@ struct keywords {
 	{"gosub", KW_GOSUB},
 	{"return", KW_RETURN},
 	{"end", KW_END},
-	{"", KW_END} 
+	{NULL, KW_END} 
 };
 
 __STACK __Code = {0,NULL};
+
+
+// Return the code PTR in context
+#define _CODE_STR (char*)getContextCodeStr(context)
+#define _CODE_SYMBOLE *(context->code.ptr + context->code.offset)
+void *getContextCodeStr(__CONTEXT *context){	return (void*)(context->code.ptr + context->code.offset);}
+
+// Return the code offset in context
+#define _CODE_OFFSET getContextCodeOffset(context)
+int getContextCodeOffset(__CONTEXT *context){	return context->code.offset;}
+
+// Return the code offset in context
+#define _CODE_PTR getContextCodePtr(context)
+void *getContextCodePtr(__CONTEXT *context){	return (void*)(context->code.ptr);}
 
 int main(int argc, char *argv[])
 {
@@ -113,26 +130,11 @@ int main(int argc, char *argv[])
 	}
 }
 
-// Return the code PTR in context
-#define _CODE_STR (char*)getContextCodeStr(context)
-#define _CODE_SYMBOLE *(context->code.ptr + context->code.offset)
-void *getContextCodeStr(__CONTEXT *context){	return (void*)(context->code.ptr + context->code.offset);}
-
-// Return the code offset in context
-#define _CODE_OFFSET getContextCodeOffset(context)
-int getContextCodeOffset(__CONTEXT *context){	return context->code.offset;}
-
-// Return the code offset in context
-#define _CODE_PTR getContextCodePtr(context)
-void *getContextCodePtr(__CONTEXT *context){	return (void*)(context->code.ptr);}
-/*
-*
-*	BUG: Memory seems to be corrupted, but no segfault. I'll try to fix that soon
-*
-*/
 __TOKEN getNextTok(__CONTEXT *context)
 {
 	char *codeStr = NULL;
+	int offset = 0;
+	char bracket;
 	__TOKEN token = {NULL,0, STOP};
 	
 	// clear context code string
@@ -140,41 +142,82 @@ __TOKEN getNextTok(__CONTEXT *context)
 	if(_CODE_SYMBOLE=='\0')
 	{
 		token.str = NULL;
-		printf("\nTOKEN:\n\ttype: STOP 0\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
 	}
 	else
 	{
 		_ubas_trimContext(context);
 		codeStr = _CODE_STR;
 	
-	
+		// Delimiter
 		if(strchr("+-*^/%=;(),><", _CODE_SYMBOLE))
 		{
 			token.str = _ubas_string(codeStr, 1);
 			token.len = 1;
 			token.type = DELIMITER;
-			printf("\nTOKEN:\n\ttype: DELIMITER\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
+			_ubas_debug_token(token);
+			context->code.offset += token.len;	return token;
 		}
+		
+		// QUOTE
+		else if(strchr("\"\'", _CODE_SYMBOLE))
+		{
+			bracket = _CODE_SYMBOLE;
+		 	context->code.offset++;
+			codeStr = _CODE_STR;
+			
+			token.len = strchr(codeStr,bracket)-codeStr;
+			token.str = _ubas_string(codeStr, token.len);
+			token.type = QUOTE;
+
+			_ubas_debug_token(token);
+			context->code.offset += token.len+1;	return token;
+		}
+		
+		// BRACKET
+		else if(strchr("[{", _CODE_SYMBOLE))
+		{
+			bracket = _CODE_SYMBOLE;
+		 	context->code.offset++;
+			codeStr = _CODE_STR;
+			
+			token.len = strchr(codeStr,bracket+2)-codeStr;
+			token.str = _ubas_string(codeStr, token.len);
+			token.type = BRACKET;
+
+			_ubas_debug_token(token);
+			context->code.offset += token.len+1;	return token;
+		}
+		
+		// Numbers
 		else if(strchr("1234567890", _CODE_SYMBOLE))
 		{
 			token.len = 0;
-			while(strchr("1234567890x", _CODE_SYMBOLE))
+			while(strchr("1234567890x", *(context->code.ptr + context->code.offset + offset)))
 			{
-				token.len ++;
-				context->code.offset++;
+				offset++;
+				if(*(context->code.ptr + context->code.offset + offset)==0)
+					break;
 			}
-			context->code.offset-=token.len;
+			token.len = offset;
+			//context->code.offset-=token.len;
 	
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = NUMBER;
-			printf("\nTOKEN:\n\ttype: NUMBER\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
+
+			_ubas_debug_token(token);
+			context->code.offset += token.len;	return token;
+
 		}
+		
+		// String
 		else
 		{
-			token.len = strcspn(codeStr," \0");
+			token.len = strcspn(codeStr," +-*^/%=;(),><");
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = STRING;
-			printf("\nTOKEN:\n\ttype: STRING\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
+
+			_ubas_debug_token(token);
+			context->code.offset += token.len;	return token;
 		}
 	}
 	
@@ -184,9 +227,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 		token.type = STOP;
 //		printf("\nTOKEN:\n\ttype: STOP\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
 	}
-	context->code.offset += token.len;
-
-	return token;
+	context->code.offset += token.len;	return token;
 }
 
 void _ubas_eval(__CONTEXT *context)
@@ -199,8 +240,10 @@ void _ubas_eval(__CONTEXT *context)
 	{
 		//printf("Prochain token:\"%s\"\n", token);
 		token = getNextTok(context);
+		printf("Stack:%d\n",context->code.offset); 
 	}
 }
+
 
 char *_ubas_string(char* str, int len)
 {
@@ -271,15 +314,7 @@ void _ubas_trimContext(__CONTEXT *context)
 	
 	while((_CODE_SYMBOLE==' '))
 	{
-		if(*(context->code.ptr + context->code.offset + 1) !='\0')
-		{
-			context->code.offset ++;
-		}
-		else
-		{
-			_CODE_SYMBOLE = 0;
-			return;
-		}
+		context->code.offset ++;
 	}
 }
 
@@ -293,6 +328,47 @@ char *trim(char *s)
     for (ptr = s + strlen(s) - 1; (ptr >= s) && isspace(*ptr); --ptr);
     ptr[1] = '\0';
     return s;
+}
+/*		DELIMITER,
+		NUMBER,
+		STRING,
+		KEYWORD,
+		QUOTE,
+		BRACKET,
+		STOP*/
+void _ubas_debug_token(__TOKEN token)
+{
+	char *tokentype;
+	switch(token.type)
+	{
+		case STRING:
+			tokentype="STRING\0";
+		break;
+		case NUMBER:
+			tokentype="NUMBER\0";
+		break;
+		case DELIMITER:
+			tokentype="DELIMITER\0";
+		break;
+		case BRACKET:
+			tokentype="BRACKET\0";
+		break;
+		case KEYWORD:
+			tokentype="KEYWORD\0";
+		break;
+		case QUOTE:
+			tokentype="QUOTE\0";
+		break;
+		case STOP:
+			tokentype="STOP\0";
+		break;
+		default:
+			tokentype="UNDEFINED\0";
+		break;
+	
+	}
+	
+	printf("\nTOKEN:\n\ttype: %s\n\tstr: %s\n\tlen: %d\n", tokentype, token.str, token.len);
 }
 
 
