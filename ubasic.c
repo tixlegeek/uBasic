@@ -46,19 +46,20 @@ typedef struct __TOKEN {
 		BRACKET,
 		STOP
 	} type ;
+	void (*ptr)(__CONTEXT *context, char* returnstr);
 } __TOKEN;
 
-void KW_PRINT (__CONTEXT *context, char* args);
-void KW_INPUT (__CONTEXT *context, char* args);
-void KW_IF (__CONTEXT *context, char* args);
-void KW_THEN (__CONTEXT *context, char* args);
-void KW_GOTO (__CONTEXT *context, char* args);
-void KW_FOR (__CONTEXT *context, char* args);
-void KW_NEXT (__CONTEXT *context, char* args);
-void KW_TO (__CONTEXT *context, char* args);
-void KW_GOSUB (__CONTEXT *context, char* args);
-void KW_RETURN (__CONTEXT *context, char* args);
-void KW_END (__CONTEXT *context, char* args);
+void KW_PRINT (__CONTEXT *context, char* returnstr);
+void KW_INPUT (__CONTEXT *context, char* returnstr);
+void KW_IF (__CONTEXT *context, char* returnstr);
+void KW_THEN (__CONTEXT *context, char* returnstr);
+void KW_GOTO (__CONTEXT *context, char* returnstr);
+void KW_FOR (__CONTEXT *context, char* returnstr);
+void KW_NEXT (__CONTEXT *context, char* returnstr);
+void KW_TO (__CONTEXT *context, char* returnstr);
+void KW_GOSUB (__CONTEXT *context, char* returnstr);
+void KW_RETURN (__CONTEXT *context, char* returnstr);
+void KW_END (__CONTEXT *context, char* returnstr);
 void *getContextCodeStr(__CONTEXT *context);
 int getContextCodeOffset(__CONTEXT *context);
 void *getContextCodePtr(__CONTEXT *context);
@@ -66,6 +67,9 @@ void *getContextCodePtr(__CONTEXT *context);
 __TOKEN getNextTok(__CONTEXT *context);
 char *_ubas_string(char* str, int len);
 void _ubas_trimContext(__CONTEXT *context);
+
+void (* _ubas_keywordCallback(__TOKEN *token))(__CONTEXT *context, char* returnstr);
+
 char *trim(char *s);
 
 void int_usage();
@@ -82,20 +86,21 @@ struct keywords {
 	// keyword string
 	char key[UBAS_KEYWORD_LEN];
 	// callback
-	void (*ptr)(__CONTEXT *context, char* args);
+	void (*ptr)(__CONTEXT *context, char* returnstr);
+	char iskw;
 } table[] = {
-	{"print", KW_PRINT},
-	{"input", KW_INPUT},
-	{"if", KW_IF},
-	{"then", KW_THEN},
-	{"goto", KW_GOTO},
-	{"for", KW_FOR},
-	{"next", KW_NEXT},
-	{"to", KW_TO},
-	{"gosub", KW_GOSUB},
-	{"return", KW_RETURN},
-	{"end", KW_END},
-	{NULL, KW_END} 
+	{"print", KW_PRINT, 1},
+	{"input", KW_INPUT, 1},
+	{"if", KW_IF, 1},
+	{"then", KW_THEN, 1},
+	{"goto", KW_GOTO, 1},
+	{"for", KW_FOR, 1},
+	{"next", KW_NEXT, 1},
+	{"to", KW_TO, 1},
+	{"gosub", KW_GOSUB, 1},
+	{"return", KW_RETURN, 1},
+	{"end", KW_END, 1},
+	{"", KW_END, 0} 
 };
 
 __STACK __Code = {0,NULL};
@@ -135,7 +140,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 	char *codeStr = NULL;
 	int offset = 0;
 	char bracket;
-	__TOKEN token = {NULL,0, STOP};
+	__TOKEN token = {NULL,0, STOP, NULL};
 	
 	// clear context code string
 	_ubas_trimContext(context);
@@ -154,7 +159,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 			token.str = _ubas_string(codeStr, 1);
 			token.len = 1;
 			token.type = DELIMITER;
-			_ubas_debug_token(token);
+			//_ubas_debug_token(token);
 			context->code.offset += token.len;	return token;
 		}
 		
@@ -169,7 +174,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = QUOTE;
 
-			_ubas_debug_token(token);
+			//_ubas_debug_token(token);
 			context->code.offset += token.len+1;	return token;
 		}
 		
@@ -184,7 +189,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = BRACKET;
 
-			_ubas_debug_token(token);
+			//_ubas_debug_token(token);
 			context->code.offset += token.len+1;	return token;
 		}
 		
@@ -204,19 +209,26 @@ __TOKEN getNextTok(__CONTEXT *context)
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = NUMBER;
 
-			_ubas_debug_token(token);
+			//_ubas_debug_token(token);
 			context->code.offset += token.len;	return token;
 
 		}
 		
-		// String
+		// String / Keyword
 		else
 		{
 			token.len = strcspn(codeStr," +-*^/%=;(),><");
 			token.str = _ubas_string(codeStr, token.len);
-			token.type = STRING;
-
-			_ubas_debug_token(token);
+			token.ptr= *_ubas_keywordCallback(&token);
+			if(token.ptr!=NULL)
+			{
+				token.type = KEYWORD;
+			}
+			else
+			{
+				token.type = STRING;
+			}
+			//_ubas_debug_token(token);
 			context->code.offset += token.len;	return token;
 		}
 	}
@@ -233,17 +245,33 @@ __TOKEN getNextTok(__CONTEXT *context)
 void _ubas_eval(__CONTEXT *context)
 {
 	__TOKEN token;
-	printf("Execution de %s\n", _CODE_STR);
+//	printf("Execution de %s\n", _CODE_STR);
 	token = getNextTok(context);
 	//printf("Prochain token:\"%s\"\n(chaine complete: \"%s\")\n", token, _CODE_STR);
 	while(token.type!=STOP)
 	{
-		//printf("Prochain token:\"%s\"\n", token);
+		if(token.type == KEYWORD)
+		{
+			(*token.ptr)(context, NULL);
+		}
 		token = getNextTok(context);
-		printf("Stack:%d\n",context->code.offset); 
 	}
 }
 
+void (* _ubas_keywordCallback(__TOKEN *token))(__CONTEXT *context, char* returnstr)
+{
+	int index=0;
+	while(table[index].iskw == 1)
+	{
+		if(strcmp (token->str,table[index].key)==0)
+		{
+			return *table[index].ptr;		
+		}
+
+		index++;
+	}
+	return NULL;
+}
 
 char *_ubas_string(char* str, int len)
 {
@@ -263,47 +291,61 @@ void int_usage()
 }
 
 
-void KW_PRINT (__CONTEXT *context, char* args)
+void KW_PRINT (__CONTEXT *context, char* returnstr)
+{
+	__TOKEN token;
+	token = getNextTok(context);
+	switch(token.type)
+	{
+		case QUOTE:
+			printf("%s\n", token.str);
+		break;
+		case STRING:
+		break;
+		case NUMBER:
+		break;
+		default:
+			printf ("ERROR\n");
+		break;
+	}
+}
+void KW_INPUT (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_INPUT (__CONTEXT *context, char* args)
+void KW_IF (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_IF (__CONTEXT *context, char* args)
+void KW_THEN (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_THEN (__CONTEXT *context, char* args)
+void KW_GOTO (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_GOTO (__CONTEXT *context, char* args)
+void KW_FOR (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_FOR (__CONTEXT *context, char* args)
+void KW_NEXT (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_NEXT (__CONTEXT *context, char* args)
+void KW_TO (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_TO (__CONTEXT *context, char* args)
+void KW_GOSUB (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_GOSUB (__CONTEXT *context, char* args)
+void KW_RETURN (__CONTEXT *context, char* returnstr)
 {
 
 }
-void KW_RETURN (__CONTEXT *context, char* args)
-{
-
-}
-void KW_END (__CONTEXT *context, char* args)
+void KW_END (__CONTEXT *context, char* returnstr)
 {
 
 }
