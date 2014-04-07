@@ -14,73 +14,11 @@
 
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <sys/time.h>
 
-#define UBAS_LABEL_LEN		32
-#define UBAS_KEYWORD_LEN		32
 
-typedef struct __STACK { 
-	unsigned int offset;
-	unsigned char *ptr;
-} __STACK;
-	
-typedef struct __CONTEXT { 
-	__STACK code;
-	unsigned int bf_watchdog;
-	unsigned int bf_abort;
-} __CONTEXT;
-
-typedef struct __TOKEN {
-	char *str;
-	int len;
-	enum {
-		DELIMITER,
-		NUMBER,
-		STRING,
-		KEYWORD,
-		QUOTE,
-		BRACKET,
-		STOP
-	} type ;
-	void (*ptr)(__CONTEXT *context, char* returnstr);
-} __TOKEN;
-
-void KW_PRINT (__CONTEXT *context, char* returnstr);
-void KW_INPUT (__CONTEXT *context, char* returnstr);
-void KW_IF (__CONTEXT *context, char* returnstr);
-void KW_THEN (__CONTEXT *context, char* returnstr);
-void KW_GOTO (__CONTEXT *context, char* returnstr);
-void KW_FOR (__CONTEXT *context, char* returnstr);
-void KW_NEXT (__CONTEXT *context, char* returnstr);
-void KW_TO (__CONTEXT *context, char* returnstr);
-void KW_GOSUB (__CONTEXT *context, char* returnstr);
-void KW_RETURN (__CONTEXT *context, char* returnstr);
-void KW_END (__CONTEXT *context, char* returnstr);
-void *getContextCodeStr(__CONTEXT *context);
-int getContextCodeOffset(__CONTEXT *context);
-void *getContextCodePtr(__CONTEXT *context);
-
-__TOKEN getNextTok(__CONTEXT *context);
-char *_ubas_string(char* str, int len);
-void _ubas_trimContext(__CONTEXT *context);
-
-void (* _ubas_keywordCallback(__TOKEN *token))(__CONTEXT *context, char* returnstr);
-
-char *trim(char *s);
-
-void int_usage();
-void _ubas_eval(__CONTEXT *context);
-
-void _ubas_debug_token(__TOKEN token);
-
-typedef struct __LABEL {
-	char name[UBAS_LABEL_LEN];
-	__STACK code;
-} __LABEL;
+#include "./ubasic.conf.h"
+#include "./ubasic.structs.h"
+#include "./ubasic.headers.h"
 
 struct keywords {
 	// keyword string
@@ -121,21 +59,201 @@ void *getContextCodePtr(__CONTEXT *context){	return (void*)(context->code.ptr);}
 
 int main(int argc, char *argv[])
 {
+	encap_error quoteerror = {0};
 	if(argc==2)
 	{
 		__Code.ptr=(unsigned char*)argv[1];
 		__CONTEXT context = {__Code, 0, 0};
-		_ubas_eval(&context);
+		
+		quoteerror = _ubas_encap(&context);
+		if(!quoteerror.general)
+		{
+			_ubas_eval(&context);
+		}
+		else
+		{
+			_ubas_debug_encap(quoteerror);
+		}
 		return 0;
 	}
 	else
 	{
-		int_usage();
+		_ubas_usage();
 		return 1;
 	}
 }
 
-__TOKEN getNextTok(__CONTEXT *context)
+void _ubas_eval(__CONTEXT *context)
+{
+	__TOKEN token;
+	token = _ubas_nextToken(context);
+	while(token.type!=STOP)
+	{
+		if(token.type == KEYWORD)
+		{
+			(*token.ptr)(context, NULL);
+		}
+		token = _ubas_nextToken(context);
+	}
+}
+
+void (* _ubas_keywordCallback(__TOKEN *token))(__CONTEXT *context, char* returnstr)
+{
+	int index=0;
+	while(table[index].iskw == 1)
+	{
+		if(strcmp (token->str,table[index].key)==0)
+		{
+			return *table[index].ptr;		
+		}
+
+		index++;
+	}
+	return NULL;
+}
+
+char *_ubas_string(char* str, int len)
+{
+	char* string = malloc((size_t)(sizeof(char)*(len+1)));
+	if(string!=NULL)
+	{
+		memcpy (string, str, len);
+		*(string+len+1) = 0;
+		return string;
+	}
+	return NULL;
+}
+
+void _ubas_trimContext(__CONTEXT *context)
+{
+	while((_CODE_SYMBOLE==' '))
+	{
+		context->code.offset ++;
+	}
+}
+
+void _ubas_usage()
+{
+	printf("Nombre d'arguments invalides.\n\tubasic \"cmd[;cmd]\"\n\n");
+}
+
+
+
+encap_error _ubas_encap(__CONTEXT *context)
+{
+	int offset = 0;
+	encap_error encap_check;
+	int simplequote_mutex = 0;
+	int doublequote_mutex = 0;
+	int bracket = 0;
+	int parenthesis= 0;
+	int brace = 0;
+	
+	while(*(context->code.ptr + context->code.offset + offset))
+	{
+		switch(	*(context->code.ptr + context->code.offset + offset))
+		{
+			case '\'':
+				if((!doublequote_mutex))
+				{
+					//simplequote_cnt ++;
+					simplequote_mutex = !simplequote_mutex;
+				}
+				
+			break;
+			case '"':
+				if((!simplequote_mutex))
+				{
+					//doublequote_cnt ++;
+					doublequote_mutex = !doublequote_mutex;
+				}
+
+			break;
+			
+			case '(':
+					parenthesis += !( simplequote_mutex || doublequote_mutex );
+			break;
+			case ')':
+					parenthesis -= !( simplequote_mutex || doublequote_mutex );
+			break;
+			
+			case '[':
+					bracket += !( simplequote_mutex || doublequote_mutex );
+			break;
+			case ']':
+					bracket -= !( simplequote_mutex || doublequote_mutex );
+			break;
+			
+			case '{':
+					brace += !( simplequote_mutex || doublequote_mutex );
+			break;
+			case '}':
+					brace -= !( simplequote_mutex || doublequote_mutex );
+			break;
+			
+			default:
+			break;
+		}
+		offset++;
+	}
+	
+	encap_check.simplequote = simplequote_mutex;
+	encap_check.doublequote = doublequote_mutex;
+	encap_check.brace = brace;
+	encap_check.bracket = bracket;
+	encap_check.parenthesis = parenthesis;
+	encap_check.general = ( simplequote_mutex || doublequote_mutex ) || (brace + bracket + parenthesis);
+	
+	return encap_check; 
+}
+
+void _ubas_debug_encap(encap_error encap)
+{
+	printf("\nENCAP ERROR:");
+	printf("\n\t simplequote: \t%d ", encap.simplequote);
+	printf("\n\t doublequote: \t%d ", encap.doublequote);
+	printf("\n\t brace: \t%d ", encap.brace);
+	printf("\n\t bracket: \t%d ", encap.bracket);
+	printf("\n\t parenthesis: \t%d ", encap.parenthesis);
+	printf("\n\t general: \t%d\n", encap.general);
+}
+
+void _ubas_debug_token(__TOKEN token)
+{
+	char *tokentype;
+	switch(token.type)
+	{
+		case STRING:
+			tokentype="STRING\0";
+		break;
+		case NUMBER:
+			tokentype="NUMBER\0";
+		break;
+		case DELIMITER:
+			tokentype="DELIMITER\0";
+		break;
+		case BRACKET:
+			tokentype="BRACKET\0";
+		break;
+		case KEYWORD:
+			tokentype="KEYWORD\0";
+		break;
+		case QUOTE:
+			tokentype="QUOTE\0";
+		break;
+		case STOP:
+			tokentype="STOP\0";
+		break;
+		default:
+			tokentype="UNDEFINED\0";
+		break;
+	
+	}
+	
+	printf("\nTOKEN:\n\ttype: %s\n\tstr: %s\n\tlen: %d\n", tokentype, token.str, token.len);
+}
+
+__TOKEN _ubas_nextToken(__CONTEXT *context)
 {
 	char *codeStr = NULL;
 	int offset = 0;
@@ -237,180 +355,7 @@ __TOKEN getNextTok(__CONTEXT *context)
 	{
 		token.len=0;
 		token.type = STOP;
-//		printf("\nTOKEN:\n\ttype: STOP\n\tstr: %s\n\tlen: %d\n", token.str, token.len);
 	}
 	context->code.offset += token.len;	return token;
 }
-
-void _ubas_eval(__CONTEXT *context)
-{
-	__TOKEN token;
-//	printf("Execution de %s\n", _CODE_STR);
-	token = getNextTok(context);
-	//printf("Prochain token:\"%s\"\n(chaine complete: \"%s\")\n", token, _CODE_STR);
-	while(token.type!=STOP)
-	{
-		if(token.type == KEYWORD)
-		{
-			(*token.ptr)(context, NULL);
-		}
-		token = getNextTok(context);
-	}
-}
-
-void (* _ubas_keywordCallback(__TOKEN *token))(__CONTEXT *context, char* returnstr)
-{
-	int index=0;
-	while(table[index].iskw == 1)
-	{
-		if(strcmp (token->str,table[index].key)==0)
-		{
-			return *table[index].ptr;		
-		}
-
-		index++;
-	}
-	return NULL;
-}
-
-char *_ubas_string(char* str, int len)
-{
-	char* string = malloc((size_t)(sizeof(char)*(len+1)));
-	if(string!=NULL)
-	{
-		memcpy (string, str, len);
-		*(string+len+1) = 0;
-		return string;
-	}
-	return NULL;
-}
-
-void int_usage()
-{
-	printf("Nombre d'arguments invalides.\n\tubasic \"cmd[;cmd]\"\n\n");
-}
-
-
-void KW_PRINT (__CONTEXT *context, char* returnstr)
-{
-	__TOKEN token;
-	token = getNextTok(context);
-	switch(token.type)
-	{
-		case QUOTE:
-			printf("%s\n", token.str);
-		break;
-		case STRING:
-		break;
-		case NUMBER:
-		break;
-		default:
-			printf ("ERROR\n");
-		break;
-	}
-}
-void KW_INPUT (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_IF (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_THEN (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_GOTO (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_FOR (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_NEXT (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_TO (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_GOSUB (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_RETURN (__CONTEXT *context, char* returnstr)
-{
-
-}
-void KW_END (__CONTEXT *context, char* returnstr)
-{
-
-}
-
-// Trim the 
-void _ubas_trimContext(__CONTEXT *context)
-{
-	
-	while((_CODE_SYMBOLE==' '))
-	{
-		context->code.offset ++;
-	}
-}
-
-char *trim(char *s) 
-{
-    char *ptr;
-    if (!s)
-        return NULL;   // handle NULL string
-    if (!*s)
-        return s;      // handle empty string
-    for (ptr = s + strlen(s) - 1; (ptr >= s) && isspace(*ptr); --ptr);
-    ptr[1] = '\0';
-    return s;
-}
-/*		DELIMITER,
-		NUMBER,
-		STRING,
-		KEYWORD,
-		QUOTE,
-		BRACKET,
-		STOP*/
-void _ubas_debug_token(__TOKEN token)
-{
-	char *tokentype;
-	switch(token.type)
-	{
-		case STRING:
-			tokentype="STRING\0";
-		break;
-		case NUMBER:
-			tokentype="NUMBER\0";
-		break;
-		case DELIMITER:
-			tokentype="DELIMITER\0";
-		break;
-		case BRACKET:
-			tokentype="BRACKET\0";
-		break;
-		case KEYWORD:
-			tokentype="KEYWORD\0";
-		break;
-		case QUOTE:
-			tokentype="QUOTE\0";
-		break;
-		case STOP:
-			tokentype="STOP\0";
-		break;
-		default:
-			tokentype="UNDEFINED\0";
-		break;
-	
-	}
-	
-	printf("\nTOKEN:\n\ttype: %s\n\tstr: %s\n\tlen: %d\n", tokentype, token.str, token.len);
-}
-
 

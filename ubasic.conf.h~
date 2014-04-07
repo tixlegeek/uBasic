@@ -1,0 +1,8 @@
+
+#ifndef UBAS_CONF
+#define UBAS_CONF
+
+	#define UBAS_LABEL_LEN		32
+	#define UBAS_KEYWORD_LEN		32
+
+#endif
