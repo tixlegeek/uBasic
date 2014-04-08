@@ -7,8 +7,23 @@
 		unsigned char *ptr;
 	} __STACK;
 	
+	typedef struct __VAR {
+		char *name;
+		int value;
+		struct __VAR *n;
+		struct __VAR *p;
+	} __VAR;
+	
+	typedef struct __VARLIST
+	{
+		size_t len;
+		struct __VAR *f;
+		struct __VAR *l;
+	} __VARLIST;
+	
 	typedef struct __CONTEXT { 
 		__STACK code;
+		__VARLIST vars;
 		unsigned int bf_watchdog;
 		unsigned int bf_abort;
 	} __CONTEXT;
@@ -21,6 +36,7 @@
 			NUMBER,
 			STRING,
 			KEYWORD,
+			EOKW,
 			QUOTE,
 			BRACKET,
 			STOP

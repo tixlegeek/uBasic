@@ -41,8 +41,10 @@ struct keywords {
 	{"", KW_END, 0} 
 };
 
-__STACK __Code = {0,NULL};
 
+
+__STACK __Code = {0,NULL};
+__VARLIST __Vars = {0, NULL, NULL};
 
 // Return the code PTR in context
 #define _CODE_STR (char*)getContextCodeStr(context)
@@ -59,13 +61,29 @@ void *getContextCodePtr(__CONTEXT *context){	return (void*)(context->code.ptr);}
 
 int main(int argc, char *argv[])
 {
+	__VAR *tempv = NULL ;
 	encap_error quoteerror = {0};
 	if(argc==2)
 	{
 		__Code.ptr=(unsigned char*)argv[1];
-		__CONTEXT context = {__Code, 0, 0};
+		__CONTEXT context = {__Code, __Vars, 0, 0};
 		
 		quoteerror = _ubas_encap(&context);
+		_ubas_var_add(&context, "test", 1);
+		_ubas_var_add(&context, "test2", 1);
+		_ubas_var_add(&context, "test3", 1);
+		_ubas_var_add(&context, "test4", 1);
+		
+		tempv = _ubas_var(&context, "test4");
+		if(tempv != NULL)
+		{
+			printf("\nVarable %s existe.",tempv->name);
+		}
+		else
+		{
+			printf("\n Non trouvé");
+		}
+
 		if(!quoteerror.general)
 		{
 			_ubas_eval(&context);
@@ -85,13 +103,21 @@ int main(int argc, char *argv[])
 
 void _ubas_eval(__CONTEXT *context)
 {
-	__TOKEN token;
+	__TOKEN token, eokwtok;
 	token = _ubas_nextToken(context);
 	while(token.type!=STOP)
 	{
 		if(token.type == KEYWORD)
 		{
 			(*token.ptr)(context, NULL);
+			eokwtok = _ubas_nextToken(context);
+			if(eokwtok.type != EOKW)
+			{
+				printf("\n%sKEYWORD ERROR:%s", CF_RED, CL_RESET);
+				printf("%sERROR Bad arguments number for command \"%s\".%s",CF_DRED, token.str, CL_RESET);
+				exit(0);
+			}
+			free(token.str);
 		}
 		token = _ubas_nextToken(context);
 	}
@@ -134,10 +160,12 @@ void _ubas_trimContext(__CONTEXT *context)
 
 void _ubas_usage()
 {
-	printf("Nombre d'arguments invalides.\n\tubasic \"cmd[;cmd]\"\n\n");
+	printf("%sNombre d'arguments invalides.\n\tubasic \"cmd[;cmd]\"%s\n\n",CF_GREEN,CL_RESET);
 }
 
-
+/*
+	Returns a struct which defines encapsulation errors.
+*/
 
 encap_error _ubas_encap(__CONTEXT *context)
 {
@@ -209,13 +237,13 @@ encap_error _ubas_encap(__CONTEXT *context)
 
 void _ubas_debug_encap(encap_error encap)
 {
-	printf("\nENCAP ERROR:");
+	printf("\n%sENCAP ERROR:%s", CB_RED, CL_RESET);
 	printf("\n\t simplequote: \t%d ", encap.simplequote);
 	printf("\n\t doublequote: \t%d ", encap.doublequote);
 	printf("\n\t brace: \t%d ", encap.brace);
 	printf("\n\t bracket: \t%d ", encap.bracket);
 	printf("\n\t parenthesis: \t%d ", encap.parenthesis);
-	printf("\n\t general: \t%d\n", encap.general);
+	printf("\n\t general: \t%d%s\n", encap.general, CL_RESET);
 }
 
 void _ubas_debug_token(__TOKEN token)
@@ -231,6 +259,9 @@ void _ubas_debug_token(__TOKEN token)
 		break;
 		case DELIMITER:
 			tokentype="DELIMITER\0";
+		break;
+		case EOKW:
+			tokentype="EOKW\0";
 		break;
 		case BRACKET:
 			tokentype="BRACKET\0";
@@ -250,7 +281,7 @@ void _ubas_debug_token(__TOKEN token)
 	
 	}
 	
-	printf("\nTOKEN:\n\ttype: %s\n\tstr: %s\n\tlen: %d\n", tokentype, token.str, token.len);
+	printf("\n%sTOKEN:\n\ttype: %s\n\tstr: %s\n\tlen: %d%s\n",CB_BLUE CF_YELLOW, tokentype, token.str, token.len, CL_RESET);
 }
 
 __TOKEN _ubas_nextToken(__CONTEXT *context)
@@ -276,8 +307,16 @@ __TOKEN _ubas_nextToken(__CONTEXT *context)
 		{
 			token.str = _ubas_string(codeStr, 1);
 			token.len = 1;
-			token.type = DELIMITER;
-			//_ubas_debug_token(token);
+			if(_CODE_SYMBOLE==';')
+			{
+				free(token.str);
+				token.type = EOKW;
+			}
+			else
+			{
+				token.type = DELIMITER;
+			}
+			_ubas_debug_token(token);
 			context->code.offset += token.len;	return token;
 		}
 		
@@ -292,7 +331,7 @@ __TOKEN _ubas_nextToken(__CONTEXT *context)
 			token.str = _ubas_string(codeStr, token.len);
 			token.type = QUOTE;
 
-			//_ubas_debug_token(token);
+			_ubas_debug_token(token);
 			context->code.offset += token.len+1;	return token;
 		}
 		
@@ -346,7 +385,7 @@ __TOKEN _ubas_nextToken(__CONTEXT *context)
 			{
 				token.type = STRING;
 			}
-			//_ubas_debug_token(token);
+			_ubas_debug_token(token);
 			context->code.offset += token.len;	return token;
 		}
 	}
